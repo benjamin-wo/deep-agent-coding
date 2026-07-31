@@ -107,6 +107,29 @@ curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
   -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
 ```
 
+## Interactive questions & GitHub-ticket planning
+
+The agent can **talk back** instead of charging ahead:
+
+- **`ask_user`** — when a request is ambiguous or needs a decision, the agent
+  pauses and asks. If it passes `options`, they arrive as tappable inline
+  buttons; the user can also just type an answer. The pending question
+  survives restarts (it lives in the SQLite checkpointer).
+- **Wayfinder on GitHub Issues** — for big, multi-session efforts the agent
+  charts a shared map of decision tickets on GitHub issues (`wayfinder:map`
+  label for the map, `wayfinder:<type>` for tickets). Operations are
+  `create_github_issue` / `list_github_issues` / `get_github_issue` /
+  `update_github_issue` / `comment_github_issue`. The per-repo conventions
+  (claim = assignee, blocking = body convention, resolve = comment + close)
+  are documented in `skills/engineering/wayfinder/trackers/github.md`.
+
+## Development
+
+```bash
+pip install -r requirements.txt pytest httpx
+python -m pytest tests/ -q
+```
+
 ## Notes / known gaps
 - **Photos/videos/voice cost an extra Gemini call before the agent even starts.**
   Fine for occasional use; if you send a lot of videos or voice notes, factor in

@@ -22,7 +22,7 @@ The map is a single issue on this repo's issue tracker, labelled `wayfinder:map`
 
 The map is an **index**, not a store. It lists the decisions made and points at the tickets that hold their detail; a decision lives in exactly one place — its ticket — so the map never restates it, only gists it and links.
 
-**Where the map, its child tickets, blocking, and frontier queries physically live is tracker-specific.** The issue tracker should have been provided to you — run `/setup-matt-pocock-skills` if not. Consult the tracker doc's "Wayfinding operations" section for how _this_ repo expresses them. If no tracker has been provided, default to the local-markdown tracker.
+**Where the map, its child tickets, blocking, and frontier queries physically live is tracker-specific.** For this repo the tracker is **GitHub Issues** — the tracker doc at `skills/engineering/wayfinder/trackers/github.md` (also mirrored at `.agents/skills/wayfinder/trackers/github.md`) has the "Wayfinding operations" section for how this repo expresses them: map = issue labeled `wayfinder:map`, tickets = child issues labeled `wayfinder:<type>`, claim = assignee, blocking = the `## Blocked by` body convention, resolve = comment + close + map update. If no tracker has been provided, default to the local-markdown tracker.
 
 ### The map body
 

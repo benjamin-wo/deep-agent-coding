@@ -31,6 +31,9 @@ from langgraph.types import interrupt, Command
 
 from deepagents import create_deep_agent
 
+from interrupts import decide_resume, is_ask_interrupt, is_push_interrupt, render_ask, render_push_approval
+from github_tools import api_comment_issue, api_create_issue, api_get_issue, api_list_issues, api_update_issue, _fmt_issue, _repo
+
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 DB_PATH = os.path.join(DATA_DIR, "agent_checkpoints.sqlite")
 
@@ -77,14 +80,24 @@ raw git command) when you want to publish a commit. It pauses for human
 approval before anything reaches the remote. If declined, drop the change and
 say so; don't retry without new instructions.
 
+Talk WITH the user, not just at them. If a request is ambiguous, underspecified,
+or hinges on a decision only the user can make, call `ask_user` with a clear
+question (and options when they help) instead of guessing. Asking a short
+series of questions is fine -- it's usually faster than building the wrong
+thing. One caveat: never use ask_user for the push approval -- that flow is
+automatic.
+
 You can also check on your other Railway-deployed agent projects with
 `list_railway_projects` and `check_deployment_status` -- these are read-only
 and cannot start, stop, or change anything.
 
 When planning complex or multi-step engineering efforts, use the wayfinder skill
 located in `skills/engineering/wayfinder/SKILL.md` (or `.agents/skills/wayfinder/SKILL.md`).
-Follow its instructions to chart a shared map of decision tickets on an issue
-tracker and work them sequentially until the path is clear.
+Wayfinder maps and decision tickets live on GitHub Issues in the GH_REPO repo --
+see `skills/engineering/wayfinder/trackers/github.md` for the exact ticket
+operations (create_github_issue / list_github_issues / get_github_issue /
+update_github_issue / comment_github_issue), then work the tickets sequentially
+until the path is clear.
 
 Keep replies concise -- this is a chat interface. Don't narrate routine tool
 use, but do summarize what changed before proposing a push.
@@ -171,6 +184,71 @@ def check_deployment_status(project_key: str) -> str:
 # Per-conversation sandbox + agent, created on demand, expiring when idle
 # ---------------------------------------------------------------------------
 
+@tool
+def ask_user(question: str, options: list[str] | None = None) -> str:
+    """Ask the user a question in Telegram and wait for their answer. Use this
+    when a request is ambiguous, needs a decision, or you need info only the
+    user has. Pass short options when a quick choice is expected (max ~8).
+    The user's reply (or chosen option) is returned as the tool result."""
+    interrupt({"action": "ask_user", "question": question, "options": options or []})
+    return "Answer received."
+
+
+# --- GitHub Issues tools (wayfinder ticket integration) --------------------
+
+@tool
+def create_github_issue(title: str, body: str, labels: list[str] | None = None, repo: str = "") -> str:
+    """Create a GitHub issue (wayfinder map or decision ticket) in a repo.
+    repo defaults to GH_REPO env. Returns the new issue number and URL."""
+    issue = api_create_issue(repo, title, body, labels)
+    return f"Created issue #{issue['number']}: {issue['title']}\n{issue['html_url']}"
+
+
+@tool
+def list_github_issues(state: str = "open", label: str | None = None, repo: str = "") -> str:
+    """List GitHub issues in a repo (pull requests excluded). Use state
+    'open'/'closed'/'all' and an optional label filter like 'wayfinder'."""
+    issues = api_list_issues(repo, state=state, label=label)
+    if not issues:
+        return f"No {state} issues{f' with label {label}' if label else ''} in {_repo(repo)}."
+    return "\n".join(_fmt_issue(i) for i in issues)
+
+
+@tool
+def get_github_issue(number: int, repo: str = "") -> str:
+    """Fetch one GitHub issue by number (full body, labels, assignee)."""
+    issue = api_get_issue(repo, number)
+    return (
+        f"#{issue['number']} {issue['title']}\n"
+        f"State: {issue['state']} | Labels: {', '.join(l['name'] for l in issue.get('labels', [])) or 'none'}\n"
+        f"Assignee: {issue.get('assignee', {}).get('login') if issue.get('assignee') else 'unassigned'}\n"
+        f"{issue.get('html_url')}\n\n{issue.get('body') or ''}"
+    )
+
+
+@tool
+def update_github_issue(
+    number: int,
+    title: str | None = None,
+    body: str | None = None,
+    state: str | None = None,
+    labels: list[str] | None = None,
+    assignees: list[str] | None = None,
+    repo: str = "",
+) -> str:
+    """Update a GitHub issue: edit title/body, set labels, claim it by
+    assignees, or close it with state='closed'. All fields optional."""
+    issue = api_update_issue(repo, number, title=title, body=body, state=state, labels=labels, assignees=assignees)
+    return f"Updated issue #{issue['number']} ({issue['state']}): {issue['title']}\n{issue['html_url']}"
+
+
+@tool
+def comment_github_issue(number: int, body: str, repo: str = "") -> str:
+    """Post a comment on a GitHub issue (e.g. a wayfinder resolution note)."""
+    c = api_comment_issue(repo, number, body)
+    return f"Commented on issue #{number}: {c['html_url']}"
+
+
 class _Session:
     def __init__(self):
         self.sandbox = self._make_sandbox()
@@ -180,7 +258,17 @@ class _Session:
             system_prompt=SYSTEM_PROMPT,
             checkpointer=checkpointer,
             backend=backend,
-            tools=[self._make_push_tool(), list_railway_projects, check_deployment_status],
+            tools=[
+                self._make_push_tool(),
+                ask_user,
+                list_railway_projects,
+                check_deployment_status,
+                create_github_issue,
+                list_github_issues,
+                get_github_issue,
+                update_github_issue,
+                comment_github_issue,
+            ],
         )
         self.last_used = time.time()
 
@@ -272,15 +360,6 @@ def get_pending_interrupt(agent, config: dict):
 
 
 def _extract_text(result: dict) -> str:
-    if "__interrupt__" in result:
-        payload = result["__interrupt__"][0].value
-        return (
-            "Approve this push?\n"
-            f"Repo: {payload['repo_path']}\n"
-            f"Branch: {payload['branch']}\n"
-            f"Message: {payload['commit_message']}\n\n"
-            "Reply 'yes' to push, anything else to cancel."
-        )
     messages = result.get("messages", [])
     if not messages:
         return "(no response)"
@@ -305,7 +384,29 @@ def _extract_text(result: dict) -> str:
     return content or "(no response)"
 
 
-def run_turn(chat_id: int, text: str) -> str:
+def _render_result(result: dict) -> dict:
+    """Turn a graph result into a structured Telegram reply.
+
+    Returns:
+      {"type": "reply", "text": str}
+      {"type": "ask", "text": str, "question": str, "options": [str]}
+      {"type": "push_approval", "text": str}
+    """
+    if "__interrupt__" in result:
+        payload = result["__interrupt__"][0].value
+        if is_push_interrupt(payload):
+            return {"type": "push_approval", "text": render_push_approval(payload)}
+        if is_ask_interrupt(payload):
+            return {
+                "type": "ask",
+                "text": render_ask(payload),
+                "question": str(payload.get("question") or ""),
+                "options": list(payload.get("options") or []),
+            }
+    return {"type": "reply", "text": _extract_text(result)}
+
+
+def run_turn(chat_id: int, text: str) -> dict:
     logger.info(f"Starting turn for chat_id={chat_id}: {text[:100]}")
     thread_id = str(chat_id)
     config = {"configurable": {"thread_id": thread_id}}
@@ -313,13 +414,15 @@ def run_turn(chat_id: int, text: str) -> str:
 
     pending = get_pending_interrupt(session.agent, config)
     if pending is not None:
-        approved = text.strip().lower() in ("yes", "y", "approve", "approved")
-        result = session.agent.invoke(Command(resume=approved), config=config)
+        # A previous turn ended on an interrupt (push approval or a question).
+        # Compute the resume value from the user's message and continue.
+        resume_value = decide_resume(pending, text)
+        result = session.agent.invoke(Command(resume=resume_value), config=config)
     else:
         result = session.agent.invoke(
             {"messages": [{"role": "user", "content": text}]},
             config=config,
         )
-    reply = _extract_text(result)
-    logger.info(f"Completed turn for chat_id={chat_id}: reply_len={len(reply)}")
+    reply = _render_result(result)
+    logger.info(f"Completed turn for chat_id={chat_id}: type={reply['type']}, reply_len={len(reply['text'])}")
     return reply

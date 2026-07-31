@@ -76,19 +76,27 @@ def format_for_telegram(text: str) -> str:
     return text
 
 
-async def send_message(chat_id: int, text: str) -> None:
+async def send_message(chat_id: int, text: str, reply_markup: dict | None = None) -> None:
     formatted_text = format_for_telegram(text)
+    payload = {"chat_id": chat_id, "text": formatted_text, "parse_mode": "HTML"}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            f"{TELEGRAM_API}/sendMessage",
-            json={"chat_id": chat_id, "text": formatted_text, "parse_mode": "HTML"},
-        )
+        resp = await client.post(f"{TELEGRAM_API}/sendMessage", json=payload)
         if resp.status_code != 200:
             logger.warning(f"Telegram HTML parse failed ({resp.text}), falling back to plain text")
-            await client.post(
-                f"{TELEGRAM_API}/sendMessage",
-                json={"chat_id": chat_id, "text": text},
-            )
+            plain = {"chat_id": chat_id, "text": text}
+            if reply_markup:
+                plain["reply_markup"] = reply_markup
+            await client.post(f"{TELEGRAM_API}/sendMessage", json=plain)
+
+
+async def answer_callback_query(callback_query_id: str, text: str = "") -> None:
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.post(
+            f"{TELEGRAM_API}/answerCallbackQuery",
+            json={"callback_query_id": callback_query_id, "text": text},
+        )
 
 
 async def download_telegram_file(file_id: str) -> bytes:
@@ -180,6 +188,31 @@ async def telegram_webhook(
         raise HTTPException(status_code=401, detail="bad secret token")
 
     update = await request.json()
+
+    # Inline-button taps (ask_user options). Resume the pending question with
+    # the chosen option by feeding it through the normal turn path.
+    callback_query = update.get("callback_query")
+    if callback_query:
+        chat_id = callback_query["message"]["chat"]["id"]
+        data = callback_query.get("data", "")
+        if data.startswith("askopt:"):
+            try:
+                idx = int(data.split(":")[1])
+                options = _ask_options.get(chat_id)
+                if options and 0 <= idx < len(options):
+                    await answer_callback_query(callback_query["id"], "Got it!")
+                    asyncio.create_task(_process_turn_and_reply(chat_id, options[idx]))
+                else:
+                    await answer_callback_query(
+                        callback_query["id"],
+                        "Option expired -- just type your answer instead.",
+                    )
+            except Exception:
+                logger.exception("failed to handle ask option callback")
+        else:
+            await answer_callback_query(callback_query["id"])
+        return {"ok": True}
+
     message = update.get("message") or update.get("edited_message")
     if not message:
         return {"ok": True}
@@ -200,17 +233,39 @@ async def telegram_webhook(
     return {"ok": True}
 
 
+# In-memory map of pending ask_user options per chat (chat_id -> [option, ...]).
+# The question itself is persisted in the LangGraph checkpointer, so a lost
+# entry only degrades the inline buttons, never the question.
+_ask_options: dict[int, list[str]] = {}
+
+
 async def _process_turn_and_reply(chat_id: int, user_text: str) -> None:
     logger.info(f"Processing turn in background for chat_id={chat_id}: {user_text[:100]}")
     try:
-        reply = await asyncio.to_thread(run_turn, chat_id, user_text)
+        result = await asyncio.to_thread(run_turn, chat_id, user_text)
     except Exception:
         logger.exception("agent invocation failed")
-        reply = "Something went wrong on my end -- try again in a moment."
+        await send_message(chat_id, "Something went wrong on my end -- try again in a moment.")
+        return
+
+    rtype = result.get("type", "reply")
+    text = result.get("text", "")
 
     try:
-        await send_message(chat_id, reply)
-        logger.info(f"Sent reply to chat_id={chat_id}, length={len(reply)}")
+        if rtype == "ask":
+            options = result.get("options") or []
+            reply_markup = None
+            if options:
+                buttons = [
+                    [{"text": opt, "callback_data": f"askopt:{i}"}]
+                    for i, opt in enumerate(options[:8])
+                ]
+                reply_markup = {"inline_keyboard": buttons}
+                _ask_options[chat_id] = options[:8]
+            await send_message(chat_id, text, reply_markup)
+        else:
+            await send_message(chat_id, text)
+        logger.info(f"Sent reply to chat_id={chat_id}, type={rtype}, length={len(text)}")
     except Exception:
         logger.exception("failed to send telegram reply")
 
