@@ -123,6 +123,28 @@ The agent can **talk back** instead of charging ahead:
   (claim = assignee, blocking = body convention, resolve = comment + close)
   are documented in `skills/engineering/wayfinder/trackers/github.md`.
 
+## Voice-first web app
+
+The same agent has a web frontend at the service root (`/`) — open it on a
+phone or desktop. Built for voice coding:
+
+- **🎙️ Voice input** — hold/tap the mic button. On browsers with Web Speech
+  API (Chrome, Edge, Safari) it transcribes locally for free; otherwise it
+  records audio and transcribes via Gemini (`GEMINI_API_KEY`, reusing
+  `multimodal.py`). You can also just type.
+- **📊 Diagrams** — the agent emits ```mermaid code blocks; the web app
+  renders them as real flowcharts/sequence diagrams. Docs render as markdown.
+- **❓ Questions & approvals** — `ask_user` options appear as tappable chips,
+  and `push_to_github` shows an Approve/Cancel card, right in the chat.
+- **🔒 Passcode** — set `WEB_APP_PASSCODE` and the web app requires a login
+  before talking to the agent. Leave unset for dev.
+- **Sessions** — each browser tab gets its own session (own sandbox + chat
+  history). "New session" starts fresh.
+
+Each web session is a separate agent conversation (thread id like `web-abc`),
+so it doesn't collide with your Telegram chats. Voice notes in Telegram keep
+working exactly as before.
+
 ## Development
 
 ```bash

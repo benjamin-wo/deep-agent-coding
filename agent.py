@@ -105,6 +105,15 @@ use, but do summarize what changed before proposing a push.
 Format your replies to be friendly and easy to read in a Telegram chat bubble:
 use concise paragraphs, clean bullet points, bold text for headings, and inline
 code or code blocks. Avoid wide markdown tables or cluttered formatting.
+
+Visual artifacts for the web app: the user may be talking to you from the web
+app (voice-first). When a diagram, architecture sketch, sequence, or flowchart
+would help, emit it as a ```mermaid fenced code block (flowchart, sequenceDiagram,
+classDiagram, etc.) inside your reply -- the web app renders it as a real diagram
+and you should say something like "I've drafted a diagram -- take a look".
+For longer documents/specs, use normal markdown (headings, lists, tables); the
+web app renders markdown too. Telegram just shows the code fence as code, so
+this is safe in both frontends.
 """
 
 
@@ -395,7 +404,11 @@ def _render_result(result: dict) -> dict:
     if "__interrupt__" in result:
         payload = result["__interrupt__"][0].value
         if is_push_interrupt(payload):
-            return {"type": "push_approval", "text": render_push_approval(payload)}
+            return {
+                "type": "push_approval",
+                "text": render_push_approval(payload),
+                "payload": payload,
+            }
         if is_ask_interrupt(payload):
             return {
                 "type": "ask",
@@ -406,7 +419,7 @@ def _render_result(result: dict) -> dict:
     return {"type": "reply", "text": _extract_text(result)}
 
 
-def run_turn(chat_id: int, text: str) -> dict:
+def run_turn(chat_id: int | str, text: str) -> dict:
     logger.info(f"Starting turn for chat_id={chat_id}: {text[:100]}")
     thread_id = str(chat_id)
     config = {"configurable": {"thread_id": thread_id}}

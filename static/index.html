@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1117" />
+  <title>Voice Code — Nexus Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <!-- Login (only shows when a passcode is configured) -->
+  <div id="login-view" class="view hidden">
+    <div class="login-card">
+      <div class="login-logo">🎙️</div>
+      <h1>Voice Code</h1>
+      <p>Talk to your coding agent. Enter the passcode to continue.</p>
+      <form id="login-form">
+        <input id="login-passcode" type="password" placeholder="Passcode" autocomplete="current-password" />
+        <button type="submit" class="btn btn-primary">Unlock</button>
+      </form>
+      <p id="login-error" class="login-error hidden">Wrong passcode, try again.</p>
+    </div>
+  </div>
+
+  <!-- Chat -->
+  <div id="chat-view" class="view hidden">
+    <header class="chat-header">
+      <div class="header-title">
+        <span class="header-dot"></span>
+        <strong>Nexus Agent</strong>
+        <span class="header-sub">voice • code • diagrams</span>
+      </div>
+      <button id="new-session" class="btn btn-ghost" title="Start a new session">New session</button>
+    </header>
+
+    <main id="messages" class="messages"></main>
+
+    <footer class="composer">
+      <button id="mic-btn" class="mic-btn" title="Hold to talk (or tap to toggle)">
+        <svg id="mic-icon" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+          <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/>
+          <path d="M17 11a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
+        </svg>
+      </button>
+      <textarea id="input" rows="1" placeholder="Type a message… or hold the mic"></textarea>
+      <button id="send-btn" class="btn btn-primary send-btn" title="Send">➤</button>
+    </footer>
+    <p id="rec-hint" class="rec-hint hidden">Listening… speak now</p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

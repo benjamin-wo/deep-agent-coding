@@ -3,13 +3,17 @@ import os
 import logging
 import html
 import re
+from pathlib import Path
 
 import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from agent import run_turn
 from multimodal import describe_image, transcribe_audio, describe_video
+from web_auth import is_valid, login
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("deepagent-telegram")
@@ -18,6 +22,11 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 # Telegram echoes this back in a header on every webhook call, so you can
 # verify requests actually came from Telegram and not a random POST to your URL.
 WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+
+# Optional passcode for the web app. If unset, the web UI is open (dev mode).
+WEB_APP_PASSCODE = os.environ.get("WEB_APP_PASSCODE", "")
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 TELEGRAM_FILE_API = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
@@ -174,7 +183,7 @@ async def _extract_user_text(message: dict) -> str | None:
     return None
 
 
-@app.get("/")
+@app.get("/health")
 async def health():
     return {"status": "ok"}
 
@@ -275,3 +284,79 @@ async def webhook_info():
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(f"{TELEGRAM_API}/getWebhookInfo")
         return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Web app (voice-first coding UI)
+# ---------------------------------------------------------------------------
+
+# Serve the static frontend. The chat API below is how it talks to the agent.
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/", include_in_schema=False)
+async def web_index():
+    index = STATIC_DIR / "index.html"
+    if not index.exists():
+        return JSONResponse({"error": "web app not built"}, status_code=404)
+    return FileResponse(str(index))
+
+
+def _require_web_auth(request: Request) -> None:
+    """Gate the web API behind the passcode (when one is configured)."""
+    if not WEB_APP_PASSCODE:
+        return
+    token = request.headers.get("X-Auth-Token", "")
+    if not is_valid(token):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
+@app.get("/api/web/status")
+async def web_status():
+    return {"auth_required": bool(WEB_APP_PASSCODE)}
+
+
+@app.post("/api/web/login")
+async def web_login(request: Request):
+    body = await request.json()
+    provided = str(body.get("passcode") or "")
+    token = login(provided, WEB_APP_PASSCODE)
+    if not token:
+        raise HTTPException(status_code=401, detail="wrong passcode")
+    return {"token": token}
+
+
+@app.post("/api/web/message")
+async def web_message(request: Request):
+    _require_web_auth(request)
+    body = await request.json()
+    session_id = str(body.get("session_id") or "").strip()
+    text = str(body.get("text") or "").strip()
+    if not session_id or not text:
+        raise HTTPException(status_code=400, detail="session_id and text are required")
+
+    try:
+        result = await asyncio.to_thread(run_turn, session_id, text)
+    except Exception:
+        logger.exception("web agent invocation failed")
+        raise HTTPException(status_code=500, detail="agent invocation failed")
+    return result
+
+
+@app.post("/api/web/transcribe")
+async def web_transcribe(request: Request):
+    """Uploaded audio -> text via Gemini. The client sends raw bytes with the
+    mime type in X-Audio-Mime (defaults to audio/ogg)."""
+    _require_web_auth(request)
+    mime = request.headers.get("X-Audio-Mime", "audio/ogg")
+    audio_bytes = await request.body()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="empty audio body")
+
+    try:
+        transcript = await asyncio.to_thread(transcribe_audio, audio_bytes, mime)
+    except Exception:
+        logger.exception("web transcription failed")
+        raise HTTPException(status_code=500, detail="transcription failed")
+    return {"text": transcript}
