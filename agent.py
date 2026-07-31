@@ -88,6 +88,10 @@ tracker and work them sequentially until the path is clear.
 
 Keep replies concise -- this is a chat interface. Don't narrate routine tool
 use, but do summarize what changed before proposing a push.
+
+Format your replies to be friendly and easy to read in a Telegram chat bubble:
+use concise paragraphs, clean bullet points, bold text for headings, and inline
+code or code blocks. Avoid wide markdown tables or cluttered formatting.
 """
 
 
