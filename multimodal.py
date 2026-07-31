@@ -24,6 +24,13 @@ _AUDIO_PROMPT = (
     "Transcribe this audio verbatim. Return only the transcript, no commentary."
 )
 
+_VIDEO_PROMPT = (
+    "Describe this video in detail for a coding assistant that cannot see "
+    "videos itself. Describe the sequence of events, any visible text, code, "
+    "error messages, stack traces, UI interactions, or terminal output verbatim "
+    "where possible."
+)
+
 
 def describe_image(image_bytes: bytes, mime_type: str, caption: str = "") -> str:
     prompt = _IMAGE_PROMPT
@@ -51,6 +58,24 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str) -> str:
             {
                 "type": "audio",
                 "data": base64.b64encode(audio_bytes).decode("utf-8"),
+                "mime_type": mime_type,
+            },
+        ],
+    )
+    return interaction.output_text
+
+
+def describe_video(video_bytes: bytes, mime_type: str, caption: str = "") -> str:
+    prompt = _VIDEO_PROMPT
+    if caption:
+        prompt += f"\n\nThe user's caption/instruction: {caption}"
+    interaction = _client.interactions.create(
+        model=GEMINI_MODEL,
+        input=[
+            {"type": "text", "text": prompt},
+            {
+                "type": "video",
+                "data": base64.b64encode(video_bytes).decode("utf-8"),
                 "mime_type": mime_type,
             },
         ],

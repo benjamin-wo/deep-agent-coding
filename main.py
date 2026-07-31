@@ -5,7 +5,7 @@ import httpx
 from fastapi import FastAPI, Request, Header, HTTPException
 
 from agent import run_turn
-from multimodal import describe_image, transcribe_audio
+from multimodal import describe_image, transcribe_audio, describe_video
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("deepagent-telegram")
@@ -30,7 +30,7 @@ async def send_message(chat_id: int, text: str) -> None:
 
 
 async def download_telegram_file(file_id: str) -> bytes:
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.get(f"{TELEGRAM_API}/getFile", params={"file_id": file_id})
         resp.raise_for_status()
         file_path = resp.json()["result"]["file_path"]
@@ -65,6 +65,41 @@ async def _extract_user_text(message: dict) -> str | None:
         audio_bytes = await download_telegram_file(file_id)
         transcript = transcribe_audio(audio_bytes, mime_type)
         return f"[Audio file transcript]\n{transcript}"
+
+    if "video" in message:
+        file_id = message["video"]["file_id"]
+        mime_type = message["video"].get("mime_type", "video/mp4")
+        video_bytes = await download_telegram_file(file_id)
+        caption = message.get("caption", "")
+        description = describe_video(video_bytes, mime_type, caption)
+        return f"[Video received]\n{description}"
+
+    if "video_note" in message:
+        file_id = message["video_note"]["file_id"]
+        video_bytes = await download_telegram_file(file_id)
+        description = describe_video(video_bytes, "video/mp4")
+        return f"[Video note received]\n{description}"
+
+    if "document" in message:
+        doc = message["document"]
+        mime_type = doc.get("mime_type", "")
+        if mime_type.startswith("image/"):
+            file_id = doc["file_id"]
+            image_bytes = await download_telegram_file(file_id)
+            caption = message.get("caption", "")
+            description = describe_image(image_bytes, mime_type, caption)
+            return f"[Image document received]\n{description}"
+        elif mime_type.startswith("video/"):
+            file_id = doc["file_id"]
+            video_bytes = await download_telegram_file(file_id)
+            caption = message.get("caption", "")
+            description = describe_video(video_bytes, mime_type, caption)
+            return f"[Video document received]\n{description}"
+        elif mime_type.startswith("audio/"):
+            file_id = doc["file_id"]
+            audio_bytes = await download_telegram_file(file_id)
+            transcript = transcribe_audio(audio_bytes, mime_type)
+            return f"[Audio document received]\n{transcript}"
 
     return None
 

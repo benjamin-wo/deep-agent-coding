@@ -1,8 +1,8 @@
 # deepagents + DeepSeek + Gemini + Telegram + E2B + Railway status, on Railway
 
-A 24/7 coding agent you talk to over Telegram. **DeepSeek** (`deepseek-v4-pro`)
-powers the actual coding/agentic work. **Gemini** handles vision and audio --
-when you send a photo or voice note, Gemini turns it into text first, then
+A 24/7 coding agent you talk to over Telegram. **DeepSeek** (`deepseek-v4-flash` by default)
+powers the actual coding/agentic work. **Gemini** handles vision, video, and audio --
+when you send a photo, video, or voice note, Gemini turns it into text first, then
 that text goes to the DeepSeek agent as a normal instruction. Gemini never
 touches code, sandboxes, or repos; it's purely a front-end transcriber.
 
@@ -25,10 +25,10 @@ run inside them -- it just has read access to check on them.
   `check_deployment_status` are read-only tools hitting Railway's GraphQL
   API to check on your other projects. A SQLite checkpointer persists
   conversation history and any pending approval across restarts.
-- `multimodal.py` -- Gemini-backed `describe_image` / `transcribe_audio`,
-  called from `main.py` before a photo or voice note ever reaches the agent.
+- `multimodal.py` -- Gemini-backed `describe_image` / `describe_video` / `transcribe_audio`,
+  called from `main.py` before a photo, video, or voice note ever reaches the agent.
 - `main.py` -- FastAPI app, one route: `/telegram/webhook`. Detects message
-  type (text, photo, voice, audio) and converts to text accordingly.
+  type (text, photo, video, video_note, voice, audio, document) and converts to text accordingly.
 - `Dockerfile` -- builds and runs the service on Railway.
 
 ## How push approval works
@@ -61,10 +61,10 @@ Message **@BotFather** -> `/newbot` -> copy the token.
 
 ### 2. DeepSeek API key
 https://platform.deepseek.com -> API keys. This powers the actual coding
-agent (`DEEPSEEK_API_KEY`, model defaults to `deepseek-v4-pro`).
+agent (`DEEPSEEK_API_KEY`, model defaults to `deepseek-v4-flash`).
 
 ### 3. Gemini API key
-https://aistudio.google.com/apikey -> used only for turning photos/voice
+https://aistudio.google.com/apikey -> used only for turning photos/videos/voice
 notes into text before they reach the DeepSeek agent (`GEMINI_API_KEY`).
 
 ### 4. E2B API key
@@ -108,8 +108,8 @@ curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
 ```
 
 ## Notes / known gaps
-- **Photos/voice cost an extra Gemini call before the agent even starts.**
-  Fine for occasional use; if you send a lot of voice notes, factor in
+- **Photos/videos/voice cost an extra Gemini call before the agent even starts.**
+  Fine for occasional use; if you send a lot of videos or voice notes, factor in
   Gemini's per-call cost on top of DeepSeek's.
 - **Gemini calls in `multimodal.py` are synchronous**, so they briefly block
   the event loop during image/audio processing. Not an issue at personal-bot

@@ -32,8 +32,8 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 DB_PATH = os.path.join(DATA_DIR, "agent_checkpoints.sqlite")
 
 DEEPSEEK_API_KEY = os.environ["DEEPSEEK_API_KEY"]
-# deepseek-v4-pro: coding/agentic/long-context. deepseek-v4-flash: cheaper/faster.
-DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
+# deepseek-v4-flash: fast/cheaper coding agent model. deepseek-v4-pro: long-context/heavy reasoning.
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 model = ChatDeepSeek(model=DEEPSEEK_MODEL, api_key=DEEPSEEK_API_KEY)
 
