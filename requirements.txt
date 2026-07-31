@@ -1,0 +1,9 @@
+deepagents>=0.5.0
+langchain-openrouter
+langchain-e2b
+e2b
+langgraph-checkpoint-sqlite
+fastapi
+uvicorn[standard]
+httpx
+python-dotenv
