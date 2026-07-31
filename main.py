@@ -107,3 +107,10 @@ async def telegram_webhook(
 
     await send_message(chat_id, reply)
     return {"ok": True}
+
+
+@app.get("/webhook-info")
+async def webhook_info():
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(f"{TELEGRAM_API}/getWebhookInfo")
+        return resp.json()
