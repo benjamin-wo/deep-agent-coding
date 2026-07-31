@@ -13,10 +13,13 @@ Two gated/read-only safety boundaries:
 """
 
 import json
+import logging
 import os
 import shlex
 import sqlite3
 import time
+
+logger = logging.getLogger("deepagent-agent")
 
 import httpx
 from e2b import Sandbox
@@ -262,17 +265,32 @@ def _extract_text(result: dict) -> str:
             f"Message: {payload['commit_message']}\n\n"
             "Reply 'yes' to push, anything else to cancel."
         )
-    last = result["messages"][-1]
+    messages = result.get("messages", [])
+    if not messages:
+        return "(no response)"
+    last = messages[-1]
     content = last.content if hasattr(last, "content") else last["content"]
     if isinstance(content, list):
         content = "".join(
             block.get("text", "") if isinstance(block, dict) else str(block)
             for block in content
         )
+    if not content:
+        for m in reversed(messages):
+            c = m.content if hasattr(m, "content") else m["content"]
+            if isinstance(c, list):
+                c = "".join(
+                    block.get("text", "") if isinstance(block, dict) else str(block)
+                    for block in c
+                )
+            if c:
+                return c
+        return "Executed actions successfully."
     return content or "(no response)"
 
 
 def run_turn(chat_id: int, text: str) -> str:
+    logger.info(f"Starting turn for chat_id={chat_id}: {text[:100]}")
     thread_id = str(chat_id)
     config = {"configurable": {"thread_id": thread_id}}
     session = _get_session(thread_id)
@@ -286,4 +304,6 @@ def run_turn(chat_id: int, text: str) -> str:
             {"messages": [{"role": "user", "content": text}]},
             config=config,
         )
-    return _extract_text(result)
+    reply = _extract_text(result)
+    logger.info(f"Completed turn for chat_id={chat_id}: reply_len={len(reply)}")
+    return reply

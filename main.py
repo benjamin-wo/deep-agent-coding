@@ -1,3 +1,4 @@
+import asyncio
 import os
 import logging
 
@@ -155,14 +156,23 @@ async def telegram_webhook(
     if user_text is None:
         return {"ok": True}  # ignore stickers, documents, etc.
 
+    asyncio.create_task(_process_turn_and_reply(chat_id, user_text))
+    return {"ok": True}
+
+
+async def _process_turn_and_reply(chat_id: int, user_text: str) -> None:
+    logger.info(f"Processing turn in background for chat_id={chat_id}: {user_text[:100]}")
     try:
-        reply = run_turn(chat_id, user_text)
+        reply = await asyncio.to_thread(run_turn, chat_id, user_text)
     except Exception:
         logger.exception("agent invocation failed")
         reply = "Something went wrong on my end -- try again in a moment."
 
-    await send_message(chat_id, reply)
-    return {"ok": True}
+    try:
+        await send_message(chat_id, reply)
+        logger.info(f"Sent reply to chat_id={chat_id}, length={len(reply)}")
+    except Exception:
+        logger.exception("failed to send telegram reply")
 
 
 @app.get("/webhook-info")
