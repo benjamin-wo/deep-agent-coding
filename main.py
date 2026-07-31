@@ -2,6 +2,7 @@ import os
 import logging
 
 import httpx
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Header, HTTPException
 
 from agent import run_turn
@@ -18,7 +19,27 @@ WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 TELEGRAM_FILE_API = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Auto-register Telegram webhook on startup when deployed on Railway or with WEBHOOK_URL
+    domain = os.environ.get("WEBHOOK_URL") or os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+    if domain and TELEGRAM_BOT_TOKEN:
+        url = domain if domain.startswith("http") else f"https://{domain}"
+        webhook_url = f"{url.rstrip('/')}/telegram/webhook"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                payload = {"url": webhook_url}
+                if WEBHOOK_SECRET:
+                    payload["secret_token"] = WEBHOOK_SECRET
+                resp = await client.post(f"{TELEGRAM_API}/setWebhook", json=payload)
+                logger.info(f"Automatically set Telegram webhook to {webhook_url}: {resp.text}")
+        except Exception:
+            logger.exception("Failed to auto-set Telegram webhook on startup")
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 async def send_message(chat_id: int, text: str) -> None:

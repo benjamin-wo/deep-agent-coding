@@ -49,8 +49,18 @@ RAILWAY_GRAPHQL_URL = "https://backboard.railway.com/graphql/v2"
 
 # Map friendly names -> Railway IDs for each of your other projects, e.g.:
 # RAILWAY_PROJECTS='{"ben-hermes-agent": {"project_id": "...", "environment_id": "...", "service_id": "..."}}'
-# Get IDs via Cmd/Ctrl+K in the Railway dashboard -> "Copy Project/Service/Environment ID".
-RAILWAY_PROJECTS = json.loads(os.environ.get("RAILWAY_PROJECTS", "{}"))
+def _load_railway_projects() -> dict:
+    val = os.environ.get("RAILWAY_PROJECTS", "").strip()
+    if not val:
+        return {}
+    try:
+        return json.loads(val)
+    except Exception:
+        return {}
+
+
+RAILWAY_PROJECTS = _load_railway_projects()
+
 
 SANDBOX_IDLE_TTL_SECONDS = int(os.environ.get("SANDBOX_IDLE_TTL_SECONDS", 20 * 60))
 
