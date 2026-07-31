@@ -218,7 +218,10 @@ class _Session:
                 f"git commit -m {shlex.quote(commit_message)} && "
                 f"git push origin {shlex.quote(branch)}"
             )
-            result = sandbox.commands.run(cmd)
+            try:
+                result = self.sandbox.commands.run(cmd)
+            except Exception as e:
+                return f"Push failed because the E2B sandbox timed out or was closed ({e}). Please re-apply your changes in a fresh sandbox and try again."
             if result.exit_code != 0:
                 return f"Push failed (exit {result.exit_code}):\n{result.stderr}"
             return f"Pushed to {branch}.\n{result.stdout}"
@@ -238,8 +241,12 @@ _sessions: dict[str, _Session] = {}
 def _get_session(thread_id: str) -> _Session:
     session = _sessions.get(thread_id)
     if session is not None and not session.is_expired():
-        session.touch()
-        return session
+        try:
+            session.sandbox.set_timeout(SANDBOX_IDLE_TTL_SECONDS)
+            session.touch()
+            return session
+        except Exception as e:
+            logger.warning(f"Sandbox for thread_id={thread_id} timed out or dead in E2B ({e}); creating new session.")
 
     if session is not None:
         try:
