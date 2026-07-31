@@ -5,6 +5,7 @@ import httpx
 from fastapi import FastAPI, Request, Header, HTTPException
 
 from agent import run_turn
+from multimodal import describe_image, transcribe_audio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("deepagent-telegram")
@@ -15,6 +16,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+TELEGRAM_FILE_API = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
 
 app = FastAPI()
 
@@ -25,6 +27,46 @@ async def send_message(chat_id: int, text: str) -> None:
             f"{TELEGRAM_API}/sendMessage",
             json={"chat_id": chat_id, "text": text},
         )
+
+
+async def download_telegram_file(file_id: str) -> bytes:
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.get(f"{TELEGRAM_API}/getFile", params={"file_id": file_id})
+        resp.raise_for_status()
+        file_path = resp.json()["result"]["file_path"]
+        file_resp = await client.get(f"{TELEGRAM_FILE_API}/{file_path}")
+        file_resp.raise_for_status()
+        return file_resp.content
+
+
+async def _extract_user_text(message: dict) -> str | None:
+    """Turn whatever kind of Telegram message this is into text for the
+    DeepSeek agent. Images/audio go through Gemini first (see multimodal.py).
+    Returns None for message types we don't handle (stickers, documents, etc)."""
+    if "text" in message:
+        return message["text"]
+
+    if "photo" in message:
+        file_id = message["photo"][-1]["file_id"]  # largest resolution
+        image_bytes = await download_telegram_file(file_id)
+        caption = message.get("caption", "")
+        description = describe_image(image_bytes, "image/jpeg", caption)
+        return f"[Image received]\n{description}"
+
+    if "voice" in message:
+        file_id = message["voice"]["file_id"]
+        audio_bytes = await download_telegram_file(file_id)
+        transcript = transcribe_audio(audio_bytes, "audio/ogg")
+        return f"[Voice message transcript]\n{transcript}"
+
+    if "audio" in message:
+        file_id = message["audio"]["file_id"]
+        mime_type = message["audio"].get("mime_type", "audio/mpeg")
+        audio_bytes = await download_telegram_file(file_id)
+        transcript = transcribe_audio(audio_bytes, mime_type)
+        return f"[Audio file transcript]\n{transcript}"
+
+    return None
 
 
 @app.get("/")
@@ -42,14 +84,23 @@ async def telegram_webhook(
 
     update = await request.json()
     message = update.get("message") or update.get("edited_message")
-    if not message or "text" not in message:
-        return {"ok": True}  # ignore non-text updates (photos, stickers, etc.)
+    if not message:
+        return {"ok": True}
 
     chat_id = message["chat"]["id"]
-    text = message["text"]
 
     try:
-        reply = run_turn(chat_id, text)
+        user_text = await _extract_user_text(message)
+    except Exception:
+        logger.exception("failed to process incoming message")
+        await send_message(chat_id, "Couldn't process that message -- try again?")
+        return {"ok": True}
+
+    if user_text is None:
+        return {"ok": True}  # ignore stickers, documents, etc.
+
+    try:
+        reply = run_turn(chat_id, user_text)
     except Exception:
         logger.exception("agent invocation failed")
         reply = "Something went wrong on my end -- try again in a moment."

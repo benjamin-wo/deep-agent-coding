@@ -21,6 +21,7 @@ import time
 import httpx
 from e2b import Sandbox
 from langchain_core.tools import tool
+from langchain_deepseek import ChatDeepSeek
 from langchain_e2b import E2BSandbox
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import interrupt, Command
@@ -30,7 +31,11 @@ from deepagents import create_deep_agent
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 DB_PATH = os.path.join(DATA_DIR, "agent_checkpoints.sqlite")
 
-MODEL = os.environ.get("OPENROUTER_MODEL", "openrouter:anthropic/claude-sonnet-4.6")
+DEEPSEEK_API_KEY = os.environ["DEEPSEEK_API_KEY"]
+# deepseek-v4-pro: coding/agentic/long-context. deepseek-v4-flash: cheaper/faster.
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
+
+model = ChatDeepSeek(model=DEEPSEEK_MODEL, api_key=DEEPSEEK_API_KEY)
 
 GH_TOKEN = os.environ["GH_TOKEN"]  # fine-grained PAT, scoped to only the repos you want it touching
 E2B_API_KEY = os.environ["E2B_API_KEY"]
@@ -149,7 +154,7 @@ class _Session:
         self.sandbox = self._make_sandbox()
         backend = E2BSandbox(sandbox=self.sandbox)
         self.agent = create_deep_agent(
-            model=MODEL,
+            model=model,
             system_prompt=SYSTEM_PROMPT,
             checkpointer=checkpointer,
             backend=backend,
