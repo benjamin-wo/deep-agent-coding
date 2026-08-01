@@ -29,11 +29,18 @@ r = client.get("/api/web/status")
 assert r.json() == {"auth_required": False}, r.json()
 print("OK  GET /api/web/status")
 
-# 3. Message round-trip
-r = client.post("/api/web/message", json={"session_id": "web-test", "text": "hello"})
-assert r.status_code == 200
-assert r.json() == {"type": "reply", "text": "echo:hello@session:web-test"}, r.json()
-print("OK  POST /api/web/message ->", r.json())
+# 3. Message round-trip (SSE streaming)
+with client.stream(
+    "POST", "/api/web/message",
+    json={"session_id": "web-test", "text": "hello"},
+) as r:
+    assert r.status_code == 200, r.status_code
+    assert r.headers.get("content-type", "").startswith("text/event-stream")
+    body = "".join(r.iter_text())
+assert "event: status" in body and '"thinking"' in body, body
+assert "event: result" in body and "echo:hello@session:web-test" in body, body
+assert "event: done" in body, body
+print("OK  POST /api/web/message streams SSE:", body.replace(chr(10), " ")[:120])
 
 # 4. Message validation
 r = client.post("/api/web/message", json={"session_id": "", "text": "hi"})

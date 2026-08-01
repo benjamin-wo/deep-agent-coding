@@ -199,6 +199,44 @@
     scrollToBottom();
   }
 
+  // Parse a chunked SSE byte stream from a fetch Response body.
+  async function readSse(res, onEvent) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let sep;
+      while ((sep = buf.indexOf("\n\n")) !== -1) {
+        const block = buf.slice(0, sep);
+        buf = buf.slice(sep + 2);
+        let event = "message";
+        let data = "";
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) data += line.slice(5).trim();
+        }
+        if (!data) continue;
+        let payload;
+        try { payload = JSON.parse(data); } catch { continue; }
+        onEvent(event, payload);
+      }
+    }
+  }
+
+  function renderResult(data) {
+    if (data.type === "ask") {
+      addAskCard(data.question || data.text, data.options || []);
+    } else if (data.type === "push_approval") {
+      const p = data.payload || {};
+      addPushCard(p.repo_path, p.branch, p.commit_message);
+    } else {
+      renderAgentText(data.text || "(no response)");
+    }
+  }
+
   async function sendMessage(text) {
     text = (text || "").trim();
     if (!text) return;
@@ -220,16 +258,35 @@
       return;
     }
 
-    removeThinking();
-    const data = await res.json().catch(() => ({}));
-
-    if (data.type === "ask") {
-      addAskCard(data.question || data.text, data.options || []);
-    } else if (data.type === "push_approval") {
-      const p = data.payload || {};
-      addPushCard(p.repo_path, p.branch, p.commit_message);
+    const ctype = res.headers.get("content-type") || "";
+    if (ctype.includes("text/event-stream")) {
+      // SSE streaming path: stage events, then the final result.
+      let finalResult = null;
+      try {
+        await readSse(res, (event, payload) => {
+          if (event === "status" && payload.state === "thinking") {
+            const t = $("#thinking");
+            if (t) t.textContent = "Working…";
+          } else if (event === "result") {
+            finalResult = payload;
+          } else if (event === "error") {
+            removeThinking();
+            addMsg("agent", `<p style="color:var(--danger)">⚠️ ${DOMPurify.sanitize(payload.message || "something went wrong")}</p>`);
+          }
+        });
+      } catch (err) {
+        removeThinking();
+        addMsg("agent", `<p style="color:var(--danger)">⚠️ ${DOMPurify.sanitize(err.message)}</p>`);
+        return;
+      }
+      removeThinking();
+      if (finalResult) renderResult(finalResult);
+      else addMsg("agent", "<p>(no response)</p>");
     } else {
-      renderAgentText(data.text || "(no response)");
+      // Fallback: plain JSON response.
+      removeThinking();
+      const data = await res.json().catch(() => ({}));
+      renderResult(data);
     }
   }
 

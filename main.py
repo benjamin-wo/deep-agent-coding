@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import logging
 import html
@@ -8,7 +9,7 @@ from pathlib import Path
 import httpx
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Header, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent import run_turn
@@ -327,6 +328,10 @@ async def web_login(request: Request):
     return {"token": token}
 
 
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
 @app.post("/api/web/message")
 async def web_message(request: Request):
     _require_web_auth(request)
@@ -336,12 +341,23 @@ async def web_message(request: Request):
     if not session_id or not text:
         raise HTTPException(status_code=400, detail="session_id and text are required")
 
-    try:
-        result = await asyncio.to_thread(run_turn, session_id, text)
-    except Exception:
-        logger.exception("web agent invocation failed")
-        raise HTTPException(status_code=500, detail="agent invocation failed")
-    return result
+    # Prototype: stream stage events over SSE so the web chat shows progress
+    # while the agent works, then the final structured result.
+    async def event_stream():
+        try:
+            yield _sse("status", {"state": "thinking"})
+            result = await asyncio.to_thread(run_turn, session_id, text)
+            yield _sse("result", result)
+            yield _sse("done", {})
+        except Exception as e:
+            logger.exception("web agent invocation failed")
+            yield _sse("error", {"message": str(e)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/web/transcribe")
