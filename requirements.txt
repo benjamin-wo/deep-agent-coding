@@ -8,3 +8,4 @@ fastapi
 uvicorn[standard]
 httpx
 python-dotenv
+psycopg[binary]

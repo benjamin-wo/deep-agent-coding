@@ -1,52 +1,83 @@
-"""Passcode auth for the web app (optional).
+"""Auth API for the web app (per-user codes, DB-backed sessions).
 
-If WEB_APP_PASSCODE is set, the web UI requires a login. Successful login
-returns a random bearer token kept in an in-memory store with an expiry.
-Restarting the service invalidates tokens (user just logs in again).
+Backed by AuthStore (Postgres via DATABASE_URL, SQLite fallback in dev).
+Users come from the WEB_APP_USERS env var, e.g.:
+    WEB_APP_USERS='{"alice": "code123", "bob": "code456"}'
 
 Pure module (no FastAPI) so it's unit-testable.
 """
 
-import secrets
-import time
+import json
+import os
 
-_TOKEN_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+from auth_store import AuthStore
 
-_tokens: dict[str, float] = {}
+_store: AuthStore | None = None
 
 
-def login(provided: str, expected: str, now: float | None = None) -> str | None:
-    """Verify a passcode. Returns a bearer token on success, else None."""
-    if not expected:
-        return None  # auth disabled; caller should not be calling login
-    if not provided:
+def _get_store() -> AuthStore:
+    global _store
+    if _store is None:
+        _store = AuthStore()
+    return _store
+
+
+def close() -> None:
+    global _store
+    if _store is not None:
+        _store.close()
+        _store = None
+
+
+def load_users_from_env() -> dict[str, str]:
+    raw = os.environ.get("WEB_APP_USERS", "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return {str(k): str(v) for k, v in parsed.items()}
+    except Exception:
+        pass
+    return {}
+
+
+def ensure_users() -> None:
+    """Seed users from WEB_APP_USERS (called at startup)."""
+    users = load_users_from_env()
+    if users:
+        _get_store().seed_users(users)
+
+
+def auth_enabled() -> bool:
+    """True if any users are configured."""
+    return bool(load_users_from_env())
+
+
+def login(username: str, code: str) -> str | None:
+    """Verify username + code. Returns a bearer token on success, else None."""
+    username = (username or "").strip()
+    code = str(code or "").strip()
+    if not username or not code:
         return None
-    if not secrets.compare_digest(provided, expected):
+    store = _get_store()
+    if not store.verify_user(username, code):
         return None
-    token = secrets.token_urlsafe(32)
-    _tokens[token] = (now if now is not None else time.time()) + _TOKEN_TTL_SECONDS
-    return token
+    return store.create_session(username)
 
 
-def is_valid(token: str | None, now: float | None = None) -> bool:
-    """True if the token is present and not expired (expired tokens are purged)."""
+def is_valid(token: str | None) -> str | None:
+    """Return the username for a valid (unexpired) token, else None."""
     if not token:
-        return False
-    now_val = now if now is not None else time.time()
-    expiry = _tokens.get(token)
-    if expiry is None:
-        return False
-    if now_val > expiry:
-        _tokens.pop(token, None)
-        return False
-    return True
+        return None
+    return _get_store().get_session_username(token)
 
 
 def revoke(token: str | None) -> None:
     if token:
-        _tokens.pop(token, None)
+        _get_store().delete_session(token)
 
 
 def clear() -> None:
-    """Test helper: drop all issued tokens."""
-    _tokens.clear()
+    """Test helper: reset the store so tests start clean."""
+    close()

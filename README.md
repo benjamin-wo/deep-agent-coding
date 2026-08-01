@@ -143,8 +143,10 @@ phone or desktop. Built for voice coding:
   renders them as real flowcharts/sequence diagrams. Docs render as markdown.
 - **❓ Questions & approvals** — `ask_user` options appear as tappable chips,
   and `push_to_github` shows an Approve/Cancel card, right in the chat.
-- **🔒 Passcode** — set `WEB_APP_PASSCODE` and the web app requires a login
-  before talking to the agent. Leave unset for dev.
+- **🔒 Auth** — set `WEB_APP_USERS` (JSON `{username: code}`) and the web app
+  requires a username + code to talk to the agent. Users and sessions persist
+  in Postgres (`DATABASE_URL`); without it they fall back to SQLite under
+  `DATA_DIR`. Codes are stored salted-hashed. Leave unset for open dev mode.
 - **Sessions** — each browser tab gets its own session (own sandbox + chat
   history). "New session" starts fresh.
 

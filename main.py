@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from agent import run_turn
 from formatting import format_for_telegram
 from multimodal import describe_image, transcribe_audio, describe_video
-from web_auth import is_valid, login
+from web_auth import auth_enabled, close as close_auth, ensure_users, is_valid, login
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("deepagent-telegram")
@@ -24,9 +24,6 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 # verify requests actually came from Telegram and not a random POST to your URL.
 WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 
-# Optional passcode for the web app. If unset, the web UI is open (dev mode).
-WEB_APP_PASSCODE = os.environ.get("WEB_APP_PASSCODE", "")
-
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
@@ -35,6 +32,12 @@ TELEGRAM_FILE_API = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Seed web-app users from WEB_APP_USERS (per-user codes, DB-backed sessions).
+    # Tolerate a briefly-unavailable DATABASE_URL at boot; auth calls retry lazily.
+    try:
+        ensure_users()
+    except Exception:
+        logger.exception("Failed to seed web-app users at startup")
     # Auto-register Telegram webhook on startup when deployed on Railway or with WEBHOOK_URL
     domain = os.environ.get("WEBHOOK_URL") or os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
     if domain and TELEGRAM_BOT_TOKEN:
@@ -50,6 +53,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Failed to auto-set Telegram webhook on startup")
     yield
+    close_auth()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -286,27 +290,31 @@ async def web_index():
     return FileResponse(str(index))
 
 
-def _require_web_auth(request: Request) -> None:
-    """Gate the web API behind the passcode (when one is configured)."""
-    if not WEB_APP_PASSCODE:
-        return
+def _require_web_auth(request: Request) -> str:
+    """Gate the web API behind user login. Returns the authenticated username
+    (empty string when auth is disabled)."""
+    if not auth_enabled():
+        return ""
     token = request.headers.get("X-Auth-Token", "")
-    if not is_valid(token):
+    username = is_valid(token)
+    if not username:
         raise HTTPException(status_code=401, detail="unauthorized")
+    return username
 
 
 @app.get("/api/web/status")
 async def web_status():
-    return {"auth_required": bool(WEB_APP_PASSCODE)}
+    return {"auth_required": auth_enabled()}
 
 
 @app.post("/api/web/login")
 async def web_login(request: Request):
     body = await request.json()
-    provided = str(body.get("passcode") or "")
-    token = login(provided, WEB_APP_PASSCODE)
+    username = str(body.get("username") or "")
+    code = str(body.get("code") or "")
+    token = login(username, code)
     if not token:
-        raise HTTPException(status_code=401, detail="wrong passcode")
+        raise HTTPException(status_code=401, detail="invalid username or code")
     return {"token": token}
 
 

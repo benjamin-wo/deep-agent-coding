@@ -13,12 +13,13 @@
     <div class="login-card">
       <div class="login-logo">🎙️</div>
       <h1>Voice Code</h1>
-      <p>Talk to your coding agent. Enter the passcode to continue.</p>
+      <p>Talk to your coding agent. Sign in to continue.</p>
       <form id="login-form">
-        <input id="login-passcode" type="password" placeholder="Passcode" autocomplete="current-password" />
-        <button type="submit" class="btn btn-primary">Unlock</button>
+        <input id="login-username" type="text" placeholder="Username" autocomplete="username" />
+        <input id="login-code" type="password" placeholder="Code" autocomplete="current-password" />
+        <button type="submit" class="btn btn-primary">Sign in</button>
       </form>
-      <p id="login-error" class="login-error hidden">Wrong passcode, try again.</p>
+      <p id="login-error" class="login-error hidden">Invalid username or code — try again.</p>
     </div>
   </div>
 

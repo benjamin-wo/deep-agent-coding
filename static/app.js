@@ -45,15 +45,17 @@
 
   $("#login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const passcode = $("#login-passcode").value;
+    const username = $("#login-username").value;
+    const code = $("#login-code").value;
     const res = await fetch(`${API}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passcode }),
+      body: JSON.stringify({ username, code }),
     });
     if (res.ok) {
       const data = await res.json();
       localStorage.setItem("dac_token", data.token);
+      localStorage.setItem("dac_username", username);
       $("#login-error").classList.add("hidden");
       loginView.classList.add("hidden");
       chatView.classList.remove("hidden");
