@@ -31,10 +31,21 @@
         <strong>Nexus Agent</strong>
         <span class="header-sub">voice • code • diagrams</span>
       </div>
+      <nav class="tabs">
+        <button id="tab-chat" class="tab active">💬 Chat</button>
+        <button id="tab-artifacts" class="tab">🗂️ Artifacts</button>
+      </nav>
       <button id="new-session" class="btn btn-ghost" title="Start a new session">New session</button>
     </header>
 
     <main id="messages" class="messages"></main>
+
+    <main id="artifacts-view" class="artifacts-view hidden">
+      <div class="artifacts-toolbar">
+        <label class="artifacts-filter"><input type="checkbox" id="artifacts-saved-only" /> Saved only</label>
+      </div>
+      <div id="artifacts-list" class="artifacts-list"></div>
+    </main>
 
     <footer class="composer">
       <button id="mic-btn" class="mic-btn" title="Hold to talk (or tap to toggle)">

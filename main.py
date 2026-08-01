@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent import run_turn
+from artifact_store import ArtifactStore, extract_artifacts
 from formatting import format_for_telegram
 from multimodal import describe_image, transcribe_audio, describe_video
 from web_auth import auth_enabled, close as close_auth, ensure_users, is_valid, login
@@ -26,18 +27,23 @@ WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# Persistent web-chat history + artifact library (SQLite under DATA_DIR).
+artifact_store: ArtifactStore | None = None
+
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 TELEGRAM_FILE_API = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global artifact_store
     # Seed web-app users from WEB_APP_USERS (per-user codes, DB-backed sessions).
     # Tolerate a briefly-unavailable DATABASE_URL at boot; auth calls retry lazily.
     try:
         ensure_users()
     except Exception:
         logger.exception("Failed to seed web-app users at startup")
+    artifact_store = ArtifactStore()
     # Auto-register Telegram webhook on startup when deployed on Railway or with WEBHOOK_URL
     domain = os.environ.get("WEBHOOK_URL") or os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
     if domain and TELEGRAM_BOT_TOKEN:
@@ -53,6 +59,9 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Failed to auto-set Telegram webhook on startup")
     yield
+    if artifact_store is not None:
+        artifact_store.close()
+        artifact_store = None
     close_auth()
 
 
@@ -336,9 +345,24 @@ async def web_message(request: Request):
     async def event_stream():
         try:
             yield _sse("status", {"state": "thinking"})
+            if artifact_store is not None:
+                await asyncio.to_thread(artifact_store.add_turn, session_id, "user", text)
             result = await asyncio.to_thread(run_turn, session_id, text)
             yield _sse("result", result)
             yield _sse("done", {})
+            # Persist the reply + extract any artifacts it contains.
+            if artifact_store is not None:
+                reply_text = result.get("text") or ""
+                await asyncio.to_thread(artifact_store.add_turn, session_id, "agent", reply_text)
+                for art in extract_artifacts(reply_text):
+                    await asyncio.to_thread(
+                        artifact_store.add_artifact,
+                        session_id,
+                        art["type"],
+                        art["source"],
+                        art["content"],
+                        saved=(art["type"] == "diagram"),  # diagrams auto-save; docs need the button
+                    )
         except Exception as e:
             logger.exception("web agent invocation failed")
             yield _sse("error", {"message": str(e)})
@@ -348,6 +372,40 @@ async def web_message(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.get("/api/web/history")
+async def web_history(request: Request):
+    """Chat history for a session (oldest -> newest)."""
+    _require_web_auth(request)
+    session_id = request.query_params.get("session_id", "")
+    if not session_id or artifact_store is None:
+        return {"turns": []}
+    turns = await asyncio.to_thread(artifact_store.get_turns, session_id, 200)
+    return {"turns": turns}
+
+
+@app.get("/api/web/artifacts")
+async def web_artifacts(request: Request):
+    """Artifact library. ?saved=1 lists only saved; ?session_id filters."""
+    _require_web_auth(request)
+    if artifact_store is None:
+        return {"artifacts": []}
+    session_id = request.query_params.get("session_id") or None
+    saved_only = request.query_params.get("saved", "0") == "1"
+    artifacts = await asyncio.to_thread(artifact_store.list_artifacts, session_id, saved_only, 100)
+    return {"artifacts": artifacts}
+
+
+@app.post("/api/web/artifacts/{artifact_id}/save")
+async def web_artifact_save(artifact_id: int, request: Request):
+    """Manually mark an artifact as saved (or unsaved with ?saved=0)."""
+    _require_web_auth(request)
+    if artifact_store is None:
+        raise HTTPException(status_code=404, detail="no artifact store")
+    saved = request.query_params.get("saved", "1") == "1"
+    await asyncio.to_thread(artifact_store.set_saved, artifact_id, saved)
+    return {"ok": True, "saved": saved}
 
 
 @app.post("/api/web/transcribe")

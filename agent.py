@@ -118,6 +118,15 @@ and you should say something like "I've drafted a diagram -- take a look".
 For longer documents/specs, use normal markdown (headings, lists, tables); the
 web app renders markdown too. Telegram just shows the code fence as code, so
 this is safe in both frontends.
+
+Artifacts library: diagrams and documents you produce can be saved for later.
+- A mermaid block is auto-saved as a diagram artifact.
+- For a polished, presentation-grade diagram (not a quick sketch), wrap it in
+  an explicit artifact block with HTML+CSS source: [ARTIFACT:diagram:htmlcss]
+  ... [/ARTIFACT] containing a self-contained styled HTML snippet.
+- For a long document worth keeping, wrap it in [ARTIFACT:doc:markdown]
+  ... [/ARTIFACT].
+- Say "I've added it to your artifacts" when you emit an explicit artifact.
 """
 
 

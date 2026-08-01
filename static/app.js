@@ -9,11 +9,16 @@
   const loginView = $("#login-view");
   const chatView = $("#chat-view");
   const messagesEl = $("#messages");
+  const artifactsView = $("#artifacts-view");
+  const artifactsList = $("#artifacts-list");
+  const artifactsSavedOnly = $("#artifacts-saved-only");
   const inputEl = $("#input");
   const micBtn = $("#mic-btn");
   const recHint = $("#rec-hint");
   const sendBtn = $("#send-btn");
   const newSessionBtn = $("#new-session");
+  const tabChat = $("#tab-chat");
+  const tabArtifacts = $("#tab-artifacts");
 
   function getSession() {
     let s = localStorage.getItem("dac_session");
@@ -137,6 +142,93 @@
     renderMermaid(el);
     scrollToBottom();
     return el;
+  }
+
+  // ---------- artifact library ----------
+  function switchTab(tab) {
+    if (tab === "artifacts") {
+      tabChat.classList.remove("active");
+      tabArtifacts.classList.add("active");
+      messagesEl.classList.add("hidden");
+      artifactsView.classList.remove("hidden");
+      loadArtifacts();
+    } else {
+      tabArtifacts.classList.remove("active");
+      tabChat.classList.add("active");
+      artifactsView.classList.add("hidden");
+      messagesEl.classList.remove("hidden");
+    }
+  }
+  tabChat.addEventListener("click", () => switchTab("chat"));
+  tabArtifacts.addEventListener("click", () => switchTab("artifacts"));
+  artifactsSavedOnly.addEventListener("change", loadArtifacts);
+
+  async function loadArtifacts() {
+    const savedOnly = artifactsSavedOnly.checked;
+    let res;
+    try {
+      res = await api(`${API}/artifacts?session_id=${encodeURIComponent(getSession())}&saved=${savedOnly ? "1" : "0"}`);
+    } catch (err) {
+      artifactsList.innerHTML = `<p class="artifact-empty">⚠️ ${DOMPurify.sanitize(err.message)}</p>`;
+      return;
+    }
+    const data = await res.json().catch(() => ({ artifacts: [] }));
+    const arts = data.artifacts || [];
+    if (!arts.length) {
+      artifactsList.innerHTML = `<p class="artifact-empty">No artifacts yet. Ask the agent to draw a diagram or write a doc.</p>`;
+      return;
+    }
+    artifactsList.innerHTML = "";
+    for (const a of arts) {
+      const card = document.createElement("div");
+      card.className = "artifact-card";
+      const typeIcon = a.type === "diagram" ? "📊" : "📄";
+      const preview = a.source === "mermaid"
+        ? `<div class="mermaid-wrap"><div class="mermaid">${DOMPurify.sanitize(a.content)}</div></div>`
+        : `<pre>${DOMPurify.sanitize(a.content).slice(0, 500)}</pre>`;
+      card.innerHTML = `
+        <div class="artifact-head">
+          <div>
+            <div class="artifact-title">${typeIcon} ${a.type} (${a.source})</div>
+            <div class="artifact-meta">${new Date(a.created_at).toLocaleString()}</div>
+          </div>
+          <button class="save-btn ${a.saved ? "saved" : ""}" data-id="${a.id}">${a.saved ? "★ Saved" : "☆ Save"}</button>
+        </div>
+        ${preview}`;
+      card.querySelector(".save-btn").addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        const saved = !btn.classList.contains("saved");
+        await api(`${API}/artifacts/${btn.dataset.id}/save?saved=${saved ? "1" : "0"}`, { method: "POST" });
+        loadArtifacts();
+      });
+      artifactsList.appendChild(card);
+      if (a.source === "mermaid") {
+        try { mermaid.run({ nodes: card.querySelectorAll(".mermaid") }); } catch (err) { /* ignore */ }
+      }
+    }
+  }
+
+  // ---------- history restore ----------
+  async function restoreHistory() {
+    let res;
+    try {
+      res = await api(`${API}/history?session_id=${encodeURIComponent(getSession())}`);
+    } catch (err) {
+      return; // 401 handled by api()
+    }
+    const data = await res.json().catch(() => ({ turns: [] }));
+    const turns = data.turns || [];
+    messagesEl.innerHTML = "";
+    for (const t of turns) {
+      if (t.role === "user") {
+        addUserBubble(t.text);
+      } else if (t.text) {
+        renderAgentText(t.text);
+      }
+    }
+    if (!turns.length) {
+      addMsg("agent", "<p>👋 Hey — I'm your coding agent. Type, or hold the mic to talk. I can draft code, explain plans, and draw diagrams right here.</p>");
+    }
   }
 
   // ---------- action cards ----------
@@ -308,6 +400,7 @@
     if (!confirm("Start a new session? The current conversation (and its sandbox) will be left behind.")) return;
     localStorage.removeItem("dac_session");
     messagesEl.innerHTML = "";
+    artifactsList.innerHTML = "";
     addMsg("agent", "<p>🆕 New session started. What are we building?</p>");
   });
 
@@ -426,11 +519,6 @@
   mermaid.initialize({ startOnLoad: false, theme: "dark" });
 
   checkStatus().then(() => {
-    if (!messagesEl.children.length) {
-      addMsg(
-        "agent",
-        "<p>👋 Hey — I'm your coding agent. Type, or hold the mic to talk. I can draft code, explain plans, and draw diagrams right here.</p>"
-      );
-    }
+    restoreHistory();
   });
 })();

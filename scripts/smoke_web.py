@@ -74,5 +74,33 @@ with TestClient(main.app) as client:
     assert r.status_code == 200 and r.json()["text"] == "[transcribed audio]", r.json()
     print("OK  POST /api/web/transcribe")
 
+    # 9. History: the turn we sent above should be persisted (user + agent).
+    r = client.get(f"/api/web/history?session_id=web-test", headers={"X-Auth-Token": token})
+    turns = r.json()["turns"]
+    assert len(turns) == 2 and turns[0]["role"] == "user" and turns[1]["role"] == "agent", turns
+    print("OK  GET /api/web/history persists turns")
+
+    # 10. Artifacts: an agent reply with a mermaid block should auto-save one.
+    main.run_turn = lambda chat_id, text: {
+        "type": "reply",
+        "text": "Diagram:\n```mermaid\nflowchart LR\nA-->B\n```",
+    }
+    with client.stream(
+        "POST", "/api/web/message",
+        json={"session_id": "web-art", "text": "draw"},
+        headers={"X-Auth-Token": token},
+    ) as r:
+        body = "".join(r.iter_text())
+    assert "event: result" in body
+    r = client.get("/api/web/artifacts?session_id=web-art", headers={"X-Auth-Token": token})
+    arts = r.json()["artifacts"]
+    assert len(arts) == 1 and arts[0]["type"] == "diagram" and arts[0]["saved"] is True, arts
+    print("OK  GET /api/web/artifacts auto-saves mermaid diagram")
+
+    # 11. Manual save toggle.
+    r = client.post(f"/api/web/artifacts/{arts[0]['id']}/save?saved=0", headers={"X-Auth-Token": token})
+    assert r.json()["saved"] is False
+    print("OK  artifact save toggle")
+
 web_auth.close()
 print("ALL WEB SMOKE TESTS PASSED")
