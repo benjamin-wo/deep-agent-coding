@@ -2,6 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# ffmpeg: audio normalization for web voice transcription (wayfinder #6).
+# Browser MediaRecorder outputs webm/mp4; Gemini needs OGG/Opus, so we convert.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

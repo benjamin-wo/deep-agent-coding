@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from agent import run_turn
 from artifact_store import ArtifactStore, extract_artifacts
+from audio import normalize_audio
 from formatting import format_for_telegram
 from multimodal import describe_image, transcribe_audio, describe_video
 from web_auth import auth_enabled, close as close_auth, ensure_users, is_valid, login
@@ -419,7 +420,10 @@ async def web_transcribe(request: Request):
         raise HTTPException(status_code=400, detail="empty audio body")
 
     try:
-        transcript = await asyncio.to_thread(transcribe_audio, audio_bytes, mime)
+        # Normalize to OGG/Opus (wayfinder #6): Safari mp4/aac etc. would be
+        # rejected by Gemini. Falls back to passthrough if ffmpeg is absent.
+        normalized = await asyncio.to_thread(normalize_audio, audio_bytes, mime)
+        transcript = await asyncio.to_thread(transcribe_audio, normalized, "audio/ogg")
     except Exception:
         logger.exception("web transcription failed")
         raise HTTPException(status_code=500, detail="transcription failed")
