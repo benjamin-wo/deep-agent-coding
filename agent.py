@@ -31,6 +31,7 @@ from langgraph.types import interrupt, Command
 
 from deepagents import create_deep_agent
 
+from diff_utils import cap_diff, has_diff_content, untracked_files_from_status
 from interrupts import decide_resume, is_ask_interrupt, is_push_interrupt, render_ask, render_push_approval
 from github_tools import api_comment_issue, api_create_issue, api_get_issue, api_list_issues, api_update_issue, _fmt_issue, _repo
 from tavily_search import format_search_results, tavily_search
@@ -80,6 +81,11 @@ The ONLY gated action is `push_to_github` -- always call it (never push via a
 raw git command) when you want to publish a commit. It pauses for human
 approval before anything reaches the remote. If declined, drop the change and
 say so; don't retry without new instructions.
+
+When you've made code changes in a repo and are about to propose a push, first
+call `get_worktree_diff` and include the returned diff in your reply inside a
+```diff fenced code block, so the user sees exactly what will be pushed before
+approving.
 
 Talk WITH the user, not just at them. If a request is ambiguous, underspecified,
 or hinges on a decision only the user can make, call `ask_user` with a clear
@@ -293,6 +299,7 @@ class _Session:
             backend=backend,
             tools=[
                 self._make_push_tool(),
+                self._make_diff_tool(),
                 ask_user,
                 list_railway_projects,
                 check_deployment_status,
@@ -318,6 +325,49 @@ class _Session:
             "&& git config --global user.name 'Deep Agent'"
         )
         return sandbox
+
+    def _make_diff_tool(self):
+        sandbox = self.sandbox
+
+        @tool
+        def get_worktree_diff(repo_path: str, base: str = "HEAD") -> str:
+            """Show the diff of code changes in a git repo on the sandbox
+            working tree, for previewing before a push. base is the git ref to
+            diff against (default HEAD = uncommitted changes; use 'HEAD~1' for
+            the last commit). Returns a capped unified diff including untracked
+            files. Call this BEFORE proposing a push and include the returned
+            diff in your reply inside a ```diff fenced code block so the web
+            app renders a diff preview."""
+            try:
+                tracked = sandbox.commands.run(
+                    f"cd {shlex.quote(repo_path)} && git diff {shlex.quote(base)} -- . 2>&1"
+                )
+                tracked_out = tracked.stdout or ""
+
+                status = sandbox.commands.run(
+                    f"cd {shlex.quote(repo_path)} && git status --porcelain 2>&1"
+                )
+                untracked = untracked_files_from_status(status.stdout or "")
+
+                untracked_parts: list[str] = []
+                for fname in untracked:
+                    r = sandbox.commands.run(
+                        f"cd {shlex.quote(repo_path)} && git diff --no-index /dev/null {shlex.quote(fname)} 2>&1 || true"
+                    )
+                    if r.stdout:
+                        untracked_parts.append(r.stdout)
+
+                full = tracked_out
+                if untracked_parts:
+                    full += "\n" + "\n".join(untracked_parts)
+
+                if not has_diff_content(full):
+                    return "No changes found in the working tree (clean, or already committed)."
+                return cap_diff(full)
+            except Exception as e:
+                return f"Failed to get worktree diff: {e}"
+
+        return get_worktree_diff
 
     def _make_push_tool(self):
         sandbox = self.sandbox

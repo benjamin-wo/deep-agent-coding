@@ -117,12 +117,33 @@
     });
   }
 
+  function renderDiffCard(code) {
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const lines = code.split("\n").map((l) => {
+      let cls = "diff-line";
+      if (l.startsWith("+++") || l.startsWith("---") || l.startsWith("@@")) cls += " diff-hunk";
+      else if (l.startsWith("+")) cls += " diff-add";
+      else if (l.startsWith("-")) cls += " diff-del";
+      return `<div class="${cls}">${esc(l)}</div>`;
+    }).join("");
+    return `<div class="diff-card"><div class="diff-head">🧩 Diff preview</div>${lines}</div>`;
+  }
+
   function renderAgentText(text) {
     const el = document.createElement("div");
     el.className = "msg agent";
     // Convert ```mermaid fences into placeholders we can extract safely.
     const mermaidBlocks = [];
-    const escaped = text.replace(
+    // Convert ```diff fences into diff cards.
+    const diffBlocks = [];
+    let escaped = text.replace(
+      /```diff\s*\n?([\s\S]*?)```/g,
+      (_, code) => {
+        diffBlocks.push(code.trim());
+        return `@@DIFF_${diffBlocks.length - 1}@@`;
+      }
+    );
+    escaped = escaped.replace(
       /```mermaid\s*\n?([\s\S]*?)```/g,
       (_, code) => {
         mermaidBlocks.push(code.trim());
@@ -134,9 +155,11 @@
     // Re-insert mermaid blocks as text (safe, mermaid reads textContent).
     html = html.replace(/@@MERMAID_(\d+)@@/g, (_, i) => {
       const code = mermaidBlocks[Number(i)] || "";
-      const esc = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      return `<pre class="mermaid-source">${esc}</pre>`;
+      const escCode = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      return `<pre class="mermaid-source">${escCode}</pre>`;
     });
+    // Re-insert diff cards.
+    html = html.replace(/@@DIFF_(\d+)@@/g, (_, i) => renderDiffCard(diffBlocks[Number(i)] || ""));
     el.innerHTML = html;
     messagesEl.appendChild(el);
     renderMermaid(el);

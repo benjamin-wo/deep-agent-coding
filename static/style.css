@@ -138,6 +138,32 @@ html, body {
 }
 .mermaid-wrap .mermaid { display: inline-block; text-align: center; }
 
+/* Diff preview cards */
+.diff-card {
+  background: #0a0e14;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 8px 0;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.diff-head {
+  background: var(--bg-input);
+  padding: 6px 10px;
+  font-weight: 600;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.diff-line {
+  white-space: pre;
+  padding: 1px 10px;
+  line-height: 1.5;
+}
+.diff-add { background: rgba(63, 185, 80, 0.15); color: #7ee787; }
+.diff-del { background: rgba(248, 81, 73, 0.15); color: #ffa198; }
+.diff-hunk { background: rgba(88, 166, 255, 0.12); color: var(--accent); }
+
 /* ---------- Action cards (ask / push) ---------- */
 .action-card {
   display: flex;
