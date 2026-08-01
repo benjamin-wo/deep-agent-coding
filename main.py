@@ -2,7 +2,6 @@ import asyncio
 import json
 import os
 import logging
-import html
 import re
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent import run_turn
+from formatting import format_for_telegram
 from multimodal import describe_image, transcribe_audio, describe_video
 from web_auth import is_valid, login
 
@@ -95,10 +95,23 @@ async def send_message(chat_id: int, text: str, reply_markup: dict | None = None
         resp = await client.post(f"{TELEGRAM_API}/sendMessage", json=payload)
         if resp.status_code != 200:
             logger.warning(f"Telegram HTML parse failed ({resp.text}), falling back to plain text")
-            plain = {"chat_id": chat_id, "text": text}
+            # Fallback: strip markdown symbols so the user sees readable text,
+            # not raw ** and _ markers.
+            plain = {"chat_id": chat_id, "text": _plain_text_fallback(text)}
             if reply_markup:
                 plain["reply_markup"] = reply_markup
             await client.post(f"{TELEGRAM_API}/sendMessage", json=plain)
+
+
+def _plain_text_fallback(text: str) -> str:
+    """Readable plain-text version of an agent reply (markdown symbols stripped)."""
+    t = text
+    t = re.sub(r"```[a-zA-Z0-9_+-]*\n?", "", t)  # strip fence lines
+    t = t.replace("**", "").replace("__", "")
+    t = re.sub(r"(?<!\w)[*_](?!\w)", "", t)  # single emphasis markers
+    t = re.sub(r"^#{1,6}\s*", "", t, flags=re.MULTILINE)
+    t = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", t)  # links -> text
+    return t.strip()
 
 
 async def answer_callback_query(callback_query_id: str, text: str = "") -> None:
