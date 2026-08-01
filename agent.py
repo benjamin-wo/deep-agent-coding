@@ -33,6 +33,7 @@ from deepagents import create_deep_agent
 
 from interrupts import decide_resume, is_ask_interrupt, is_push_interrupt, render_ask, render_push_approval
 from github_tools import api_comment_issue, api_create_issue, api_get_issue, api_list_issues, api_update_issue, _fmt_issue, _repo
+from tavily_search import format_search_results, tavily_search
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 DB_PATH = os.path.join(DATA_DIR, "agent_checkpoints.sqlite")
@@ -90,6 +91,9 @@ automatic.
 You can also check on your other Railway-deployed agent projects with
 `list_railway_projects` and `check_deployment_status` -- these are read-only
 and cannot start, stop, or change anything.
+
+For online research (current facts, docs, pricing, news), use `search_web`
+(Tavily) -- prefer it over guessing or relying on stale knowledge.
 
 When planning complex or multi-step engineering efforts, use the wayfinder skill
 located in `skills/engineering/wayfinder/SKILL.md` (or `.agents/skills/wayfinder/SKILL.md`).
@@ -258,6 +262,17 @@ def comment_github_issue(number: int, body: str, repo: str = "") -> str:
     return f"Commented on issue #{number}: {c['html_url']}"
 
 
+@tool
+def search_web(query: str, max_results: int = 5, search_depth: str = "basic") -> str:
+    """Search the web using Tavily. Use this for online research: current
+    facts, docs, pricing, news, or anything outside your local context.
+    Returns a summary (when available) plus ranked results with URLs and
+    snippets. Pass search_depth='advanced' for deeper analysis on complex
+    queries."""
+    result = tavily_search(query, max_results=max_results, search_depth=search_depth)
+    return format_search_results(result, max_results=max_results)
+
+
 class _Session:
     def __init__(self):
         self.sandbox = self._make_sandbox()
@@ -277,6 +292,7 @@ class _Session:
                 get_github_issue,
                 update_github_issue,
                 comment_github_issue,
+                search_web,
             ],
         )
         self.last_used = time.time()

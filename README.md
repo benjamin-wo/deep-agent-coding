@@ -107,6 +107,13 @@ curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
   -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
 ```
 
+## Web search (Tavily)
+
+Set `TAVILY_API_KEY` and the agent gains a `search_web` tool for online
+research (current facts, docs, pricing, news). Returns an AI summary when
+available plus ranked results with URLs and snippets; `search_depth="advanced"`
+for deeper queries.
+
 ## Interactive questions & GitHub-ticket planning
 
 The agent can **talk back** instead of charging ahead:
